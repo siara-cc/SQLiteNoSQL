@@ -37,7 +37,6 @@ public:
       err_no = errno;
       return;
     }
-
   }
   int get_errno() {
     return err_no;
@@ -48,7 +47,7 @@ public:
     return "error";
   }
   int32_t getRootPageOf(char *obj_name, struct cursor_struct *cursor = NULL);
-  int locate(int32_t root_page, byte **pay_load_ptr, 
+  int locate(int32_t root_page, byte **pay_load_ptr,
         int64_t row_id, byte *key_array[] = NULL, int key_len_array[] = NULL,
         struct cursor_struct *cursor = NULL);
   int next(struct cursor_struct *cursor, byte **pay_load_ptr);

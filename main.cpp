@@ -8,6 +8,5 @@ int main(int argc, char *argv[]) {
     }
     SQLiteNoSQL sqliteNoSQL(argv[1]);
     uint32_t root_page = sqliteNoSQL.getRootPageOf(argv[2]);
-    locatePayloadByKey
     return 0;
 }
