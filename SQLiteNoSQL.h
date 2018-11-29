@@ -1,7 +1,10 @@
 #ifndef SQLiteNoSQL_h
 #define SQLiteNoSQL_h
 
+#include <stdio.h>
 #include <stdint.h>
+#include <string.h>
+#include <errno.h>
 #ifdef ARDUINO
 #include <Arduino.h>
 #endif
@@ -11,27 +14,47 @@ typedef unsigned char byte;
 #define NULL 0
 #endif
 
-class sqlite3_file_handler {
-
+struct cursor_struct {
+  byte page_path;
+  int cell_pos;
+  int cell_count;
 };
 
 class SQLiteNoSQL {
+
 private:
   byte *buf;
-  sqlite3_file_handler fh;
   char *file_name;
-  byte *page_path;
+  FILE *fd;
+  int err_no;
 
 public:
-  Sqlite3_512(char *file_name, sqlite3_file_handler& file_handler, byte *working_buf = NULL) {
-    fh = file_handler;
+  SQLiteNoSQL(char *file_path, byte *working_buf = NULL) {
     buf = working_buf;
+    err_no = 0;
+    fd = fopen(file_path, "r");
+    if (fd == NULL) {
+      err_no = errno;
+      return;
+    }
+
   }
-  int getRootPageOf(char *obj_name, uint32_t *root_page_ptr);
-  int locatePayloadByRowId(uint32_t root_page, uint32_t rowid, byte **pay_load_ptr);
-  int locatePayloadByKey(uint32_t root_page, byte **pay_load_ptr, ...);
+  int get_errno() {
+    return err_no;
+  }
+  char *str_err() {
+    if (err_no < 10000)
+      return strerror(err_no);
+    return "error";
+  }
+  int32_t getRootPageOf(char *obj_name, struct cursor_struct *cursor = NULL);
+  int locate(int32_t root_page, byte **pay_load_ptr, 
+        int64_t row_id, byte *key_array[] = NULL, int key_len_array[] = NULL,
+        struct cursor_struct *cursor = NULL);
+  int next(struct cursor_struct *cursor, byte **pay_load_ptr);
   int parseColumn(byte *pay_load, int col_idx, byte *parsedValue, int *value_len);
+  void close();
 
 };
 
-#endif // SqliteNoSQL_h
+#endif // SQLiteNoSQL_h
