@@ -14,6 +14,8 @@ typedef unsigned char byte;
 #define NULL 0
 #endif
 
+#define NO_SQLITE_ERR_PAGE_NOT_FOUND 30001
+
 struct cursor_struct {
   byte page_path;
   int cell_pos;
@@ -27,6 +29,7 @@ private:
   char *file_name;
   FILE *fd;
   int err_no;
+  int getValueLen(byte *payload, int col_idx);
 
 public:
   SQLiteNoSQL(char *file_path, byte *working_buf = NULL) {
@@ -42,16 +45,16 @@ public:
     return err_no;
   }
   char *str_err() {
-    if (err_no < 10000)
+    if (err_no < 32000)
       return strerror(err_no);
     return "error";
   }
   int32_t getRootPageOf(char *obj_name, struct cursor_struct *cursor = NULL);
-  int locate(int32_t root_page, byte **pay_load_ptr,
+  int locate(int32_t root_page, byte **payload_ptr,
         int64_t row_id, byte *key_array[] = NULL, int key_len_array[] = NULL,
         struct cursor_struct *cursor = NULL);
-  int next(struct cursor_struct *cursor, byte **pay_load_ptr);
-  int parseColumn(byte *pay_load, int col_idx, byte *parsedValue, int *value_len);
+  int next(struct cursor_struct *cursor, byte **payload_ptr);
+  int parseColumn(byte *payload, int col_idx, byte *parsedValue);
   void close();
 
 };
