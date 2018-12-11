@@ -29,7 +29,7 @@ private:
   char *file_name;
   FILE *fd;
   int err_no;
-  int getValueLen(byte *payload, int col_idx);
+  static const int8_t data_size_map[10];
 
 public:
   SQLiteNoSQL(char *file_path, byte *working_buf = NULL) {
@@ -54,7 +54,7 @@ public:
         int64_t row_id, byte *key_array[] = NULL, int key_len_array[] = NULL,
         struct cursor_struct *cursor = NULL);
   int next(struct cursor_struct *cursor, byte **payload_ptr);
-  int parseColumn(byte *payload, int col_idx, byte *parsedValue);
+  int parseColumn(byte *payload, int col_idx, byte **parsedValue);
   void close();
 
 };
