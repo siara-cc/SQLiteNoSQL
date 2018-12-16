@@ -1,112 +1,147 @@
 #include "SQLiteNoSQL.h"
 #include <limits.h>
+#include <math.h>
+
+// constructor
+SQLiteNoSQL::SQLiteNoSQL(char *filePath, byte *workingBuf = NULL) {
+  buf = workingBuf;
+  err_no = 0;
+  fd = fopen(filePath, "rb");
+  if (fd == NULL) {
+    err_no = errno;
+    return;
+  }
+  readFromFile(1, 100);
+  if (err_no)
+    return;
+#ifdef NO_SQLITE_CFG_CHECK_SIG
+  if (buf[0] != 83 || buf[1] != 81 || buf[2] != 76 || buf[3] != 105
+          || buf[4] != 116 || buf[5] != 101 || buf[6] != 32 || buf[7] != 102
+          || buf[8] != 111 || buf[9] != 114 || buf[10] != 109 || buf[11] != 97
+          || buf[12] != 116 || buf[13] != 32 || buf[14] != 51 || buf[15] != 0) {
+    err_no = NO_SQLITE_ERR_NOT_SQLITE_DB;
+    return;
+  }
+#endif
+  pageSize = twoBytesToInt(buf, 16);
+  if (pageSize == 1)
+      pageSize = 65536;
+  usableSize = pageSize - buf[20];
+  maxLocal = floor((usableSize - 12) * 64 / 255 - 23);
+  minLocal = floor((usableSize - 12) * 32 / 255 - 23);
+  maxLeaf = floor(usableSize - 35);
+  minLeaf = floor((usableSize - 12) * 32 / 255 - 23);
+}
+
+int SQLiteNoSQL::getPage(uint32_t pageNo) {
+  readFromFile(pageNo, pageSize);
+}
+
+void SQLiteNoSQL::readFromFile(uint32_t pageNo, size_t bytesToRead) {
+  if (fseek(fd, pageNo))
+  size_t bytesRead = fread(buf, pageSize, 1, fd);
+  if (ferror(fd)) {
+    err_no = errno;
+    return;
+  }
+  if (bytesRead != bytesToRead) {
+    err_no = NO_SQLITE_ERR_SHORT_READ;
+    return;
+  }
+}
 
 // returns page number on success, 0 on failure
 // check errno for error details.
-int32_t SQLiteNoSQL::getRootPageOf(char *obj_name, struct cursor_struct *cursor) {
+int32_t SQLiteNoSQL::getRootPageOf(char *objName, struct cursor_struct *cursor) {
   byte *payload;
   err_no = 0;
-  struct cursor_struct local_cursor;
+  struct cursor_struct localCursor;
   if (cursor == NULL)
-    cursor = &local_cursor;
+    cursor = &localCursor;
   locate(1, &payload, 0, NULL, NULL, cursor);
   if (err_no)
     return 0;
   do {
-    byte *value_ptr;
-    int value_len = parseColumn(payload, 2, &value_ptr);
+    byte *valuePtr;
+    int valueLen = parseColumn(payload, 2, &valuePtr);
     if (err_no)
        return 0;
-    if (value_len == strlen(obj_name) &&
-        strnstr(obj_name, (const char *) value_ptr, value_len) == obj_name) {
-      value_len = parseColumn(payload, 4, &value_ptr);
+    if (valueLen == strlen(objName) &&
+        strnstr(objName, (const char *) valuePtr, valueLen) == objName) {
+      valueLen = parseColumn(payload, 4, &valuePtr);
       if (err_no)
         return 0;
-      return getIntValue(value_ptr, value_len);
+      return getIntValue(valuePtr, valueLen);
     }
   } while (next(cursor, &payload));
   err_no = NO_SQLITE_ERR_PAGE_NOT_FOUND;
   return 0;
 }
 
-int SQLiteNoSQL::locate(int32_t root_page, byte **payload_ptr,
-      int64_t row_id, byte *key_array[], int key_len_array[],
-      struct cursor_struct *cursor) {  
+int SQLiteNoSQL::locate(int32_t rootPage, byte **payloadPtr,
+      int64_t rowId, byte *keyArray[], int keyLenArray[],
+      struct cursor_struct *cursor) {
+  buf = getPage(rootPage);
+  do {
+    add to page path
+    binary search
+    if (index and found)
+      return payload
+  } while (!leaf)
 }
       
-int SQLiteNoSQL::next(struct cursor_struct *cursor, byte **payload_ptr) {
-
+int SQLiteNoSQL::next(struct cursor_struct *cursor, byte **payloadPtr) {
+  
 }
 
-int SQLiteNoSQL::parseColumn(byte *payload, int col_idx, byte **parsedValue) {
+int SQLiteNoSQL::parseColumn(byte *payload, int colIdx, byte **valuePtr) {
   uint64_t ui64;
   int vlen = getVarInt(payload, &ui64);
   byte *data = payload + ui64;
   payload += vlen;
   int curCol = 1;
-  while (payload < hdrLen && curCol < col_idx) {
+  while (payload < data && curCol < colIdx) {
     vlen = getVarInt(payload, &ui64);
     payload += vlen;
+    data += (ui64 < 10 ? data_size_map[ui64] :
+      (ui64 - (ui64 % 2 ? 12 : 13)) / 2);
     curCol++;
   }
+  *valuePtr = NULL;
+  if (curCol == colIdx) {
+    vlen = getVarInt(payload, &ui64);
     switch (ui64) {
       case 0:
-      case 8:
-      case 9:
-          *parsedValue = NULL;
-        break;
+        return 0;
       case 1:
       case 2:
       case 3:
       case 4:
-        hdr += "<td>i" + (8 * colInfo[0]) + "</td>";
-        det += getIntValue(arr, dataPtr, colInfo[0]);
-        dataPtr += colInfo[0];
-        break;
       case 5:
       case 6:
-        hdr += "<td>i" + (colInfo[0] == 5 ? "48" : "64") + "</td>";
-        det += getIntValue(arr, dataPtr, colInfo[0] == 5 ? 6 : 8);
-        dataPtr += (colInfo[0] == 5 ? 6 : 8);
-        break;
       case 7:
-        hdr += "<td>f64</td>";
-        det += getFloatValue(arr, dataPtr).toPrecision();
-        dataPtr += 8;
-        break;
-      case 10:
-      case 11:
-        hdr += "?";
-        det += "?";
-        break;
+        *valuePtr = data;
+        return data_size_map[ui64];
+      case 8:
+        *valuePtr = (byte *) &data_size_map[0];
+        return 1;
+      case 9:
+        *valuePtr = (byte *) &data_size_map[1];
+        return 1;
       default:
-        var dataLen = colInfo[0] - (colInfo[0] % 2 ? 12 : 13);
-        dataLen /= 2;
-        dataLen = Math.floor(dataLen);
-        if (colInfo[0] % 2) {
-          hdr += "<td>text</td>";
-          var dec = new TextDecoder(txtEncoding);
-          det += dec.decode(arr.slice(dataPtr, dataPtr + dataLen));
-        } else {
-          hdr += "<td>blob</td>";
-          det += toHexString(arr.slice(dataPtr, dataLen));
-        }
-        dataPtr += dataLen;
-    }
-    if (pageId.substr(0, 2) == 'r0' && colIdx == 3) {
-      var pageNo = det.substring(det.lastIndexOf("<td>") + 4);
-      det += "<input type='button' value='Open'"
-              + " onclick='openPage(\"" + pageId + "\"," + pageNo + ", \"b\", true)'/>";
+        *valuePtr = data;
+        return (ui64 - (ui64 % 2 ? 12 : 13)) / 2;
     }
   }
-  return [hdr, det];
+  errno = NO_SQLITE_ERR_FINDING_COL;
+  return -1;
 }
 
 void SQLiteNoSQL::close() {
   fclose(fd);
 }
 
-static int getVarInt(byte *at, uint64_t *ret) {
+int SQLiteNoSQL::getVarInt(byte *at, uint64_t *ret) {
   int len = 0;
   *ret = 0;
   while (len++ < 8) {
@@ -122,7 +157,7 @@ static int getVarInt(byte *at, uint64_t *ret) {
   return len;
 }
 
-static uint64_t getIntValue(byte *at, int sz) {
+uint64_t SQLiteNoSQL::getIntValue(byte *at, int sz) {
   uint64_t ret = 0;
   while (sz--) {
     ret <<= 8;
@@ -131,14 +166,14 @@ static uint64_t getIntValue(byte *at, int sz) {
   return ret;
 }
 
-static double getFloatValue(byte *at) {
+double SQLiteNoSQL::getFloatValue(byte *at) {
   double out;
   for (int i = 0; i < 8; ++i)
     out += (uint64_t) at[i] << (i * CHAR_BIT);
   return out;
 }
 
-static int compare(const char *v1, byte len1, const char *v2,
+int SQLiteNoSQL::compare(const char *v1, byte len1, const char *v2,
       byte len2, int k = 0) {
   int lim = (len2 < len1 ? len2 : len1);
   while (k < lim) {
@@ -156,4 +191,4 @@ static int compare(const char *v1, byte len1, const char *v2,
   return (len1 < len2 ? -k : k);
 }
 
-int8_t data_size_map[] = {0, 1, 2, 3, 4, 6, 8, 8, 0, 0};
+const int8_t SQLiteNoSQL::data_size_map[] = {0, 1, 2, 3, 4, 6, 8, 8, 0, 0};
