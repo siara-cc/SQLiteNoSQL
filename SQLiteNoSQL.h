@@ -2,6 +2,7 @@
 #define SQLiteNoSQL_h
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
@@ -20,11 +21,59 @@ typedef unsigned char byte;
 #define NO_SQLITE_ERR_FINDING_COL    30002
 #define NO_SQLITE_ERR_SHORT_READ     30003
 #define NO_SQLITE_ERR_NOT_SQLITE_DB  30004
+#define NO_SQLITE_ERR_MALLOC         30005
 
-struct cursor_struct {
-  byte pagePath;
-  int cellPos;
-  int cellCount;
+class cursor_class {
+  private:
+    int32_t *pagePath;
+    int16_t *cellPosPath;
+    byte alloc_depth;
+    byte depth;
+    int *perr_no;
+    void cc_alloc() {
+      pagePath = (int32_t *) calloc(alloc_depth, sizeof(int32_t));
+      if (pagePath == NULL)
+        *perr_no = NO_SQLITE_ERR_MALLOC;
+      cellPosPath = (int16_t *) calloc(alloc_depth, sizeof(int16_t));
+      if (cellPosPath == NULL)
+        *perr_no = NO_SQLITE_ERR_MALLOC;
+    }
+    void cc_free() {
+      free(pagePath);
+      free(cellPosPath);
+    }
+  public:
+    cursor_class(int *e) {
+      alloc_depth = 2;
+      depth = 0;
+      perr_no = e;
+      cc_alloc();
+    }
+    ~cursor_class() {
+      cc_free();
+    }
+    void pushPage(int32_t pageNo, int cellPos) {
+      if (alloc_depth == depth) {
+        cc_free();
+        alloc_depth += 4;
+        cc_alloc();
+      }
+      pagePath[depth] = pageNo;
+      cellPosPath[depth] = cellPos;
+      depth++;
+    }
+    void popPage() {
+      depth--;
+    }
+    void popAll() {
+      depth = 0;
+    }
+    int32_t getCurPage() {
+      return pagePath[depth - 1];
+    }
+    int16_t getCurCellPos() {
+      return cellPosPath[depth - 1];
+    }
 };
 
 class SQLiteNoSQL {
@@ -36,19 +85,19 @@ private:
   int pageSize, usableSize, maxLocal, minLocal, maxLeaf, minLeaf;
   int err_no;
   static const int8_t data_size_map[10];
-  int getPage(uint32_t pageNo);
+  void getPage(uint32_t pageNo);
   void readFromFile(uint32_t pageNo, size_t bytesToRead);
+  int binarySearch(int64_t rowId, byte *keyArray[], int keyLenArray[]);
 
 public:
   SQLiteNoSQL(char *filePath, byte *workingBuf = NULL);
-  int32_t getRootPageOf(char *objName, struct cursor_struct *cursor = NULL);
+  int32_t getRootPageOf(char *objName, cursor_class *cursor = NULL);
   int locate(int32_t rootPage, byte **payloadPtr,
         int64_t rowId, byte *keyArray[] = NULL, int keyLenArray[] = NULL,
-        struct cursor_struct *cursor = NULL);
-  int next(struct cursor_struct *cursor, byte **payloadPtr);
+        cursor_class *cursor = NULL);
+  int next(cursor_class *cursor, byte **payloadPtr);
   int parseColumn(byte *payload, int colIdx, byte **valuePtr);
   void close();
-
   int get_errno() {
     return err_no;
   }

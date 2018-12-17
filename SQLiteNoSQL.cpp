@@ -3,7 +3,7 @@
 #include <math.h>
 
 // constructor
-SQLiteNoSQL::SQLiteNoSQL(char *filePath, byte *workingBuf = NULL) {
+SQLiteNoSQL::SQLiteNoSQL(char *filePath, byte *workingBuf) {
   buf = workingBuf;
   err_no = 0;
   fd = fopen(filePath, "rb");
@@ -25,7 +25,7 @@ SQLiteNoSQL::SQLiteNoSQL(char *filePath, byte *workingBuf = NULL) {
 #endif
   pageSize = twoBytesToInt(buf, 16);
   if (pageSize == 1)
-      pageSize = 65536;
+    pageSize = 65536;
   usableSize = pageSize - buf[20];
   maxLocal = floor((usableSize - 12) * 64 / 255 - 23);
   minLocal = floor((usableSize - 12) * 32 / 255 - 23);
@@ -33,12 +33,15 @@ SQLiteNoSQL::SQLiteNoSQL(char *filePath, byte *workingBuf = NULL) {
   minLeaf = floor((usableSize - 12) * 32 / 255 - 23);
 }
 
-int SQLiteNoSQL::getPage(uint32_t pageNo) {
+void SQLiteNoSQL::getPage(uint32_t pageNo) {
   readFromFile(pageNo, pageSize);
 }
 
 void SQLiteNoSQL::readFromFile(uint32_t pageNo, size_t bytesToRead) {
-  if (fseek(fd, pageNo))
+  if (fseek(fd, (pageNo - 1) * pageSize, SEEK_SET)) {
+    err_no = errno;
+    return;
+  }
   size_t bytesRead = fread(buf, pageSize, 1, fd);
   if (ferror(fd)) {
     err_no = errno;
@@ -48,14 +51,18 @@ void SQLiteNoSQL::readFromFile(uint32_t pageNo, size_t bytesToRead) {
     err_no = NO_SQLITE_ERR_SHORT_READ;
     return;
   }
+  if (pageNo == 1)
+    buf += 100;
 }
 
 // returns page number on success, 0 on failure
 // check errno for error details.
-int32_t SQLiteNoSQL::getRootPageOf(char *objName, struct cursor_struct *cursor) {
+int32_t SQLiteNoSQL::getRootPageOf(char *objName, cursor_class *cursor) {
   byte *payload;
   err_no = 0;
-  struct cursor_struct localCursor;
+  cursor_class localCursor(&err_no);
+  if (err_no)
+    return 0;
   if (cursor == NULL)
     cursor = &localCursor;
   locate(1, &payload, 0, NULL, NULL, cursor);
@@ -78,19 +85,44 @@ int32_t SQLiteNoSQL::getRootPageOf(char *objName, struct cursor_struct *cursor) 
   return 0;
 }
 
+int SQLiteNoSQL::binarySearch(int64_t rowId, byte *keyArray[], int keyLenArray[]) {
+  int middle, first, filled_size;
+  first = 0;
+  filled_size = twoBytesToInt(buf, 3);
+  while (first < filled_size) {
+      middle = (first + filled_size) >> 1;
+      key_at = getKey(middle, &key_at_len);
+      int16_t cmp = util::compare((char *) key_at, key_at_len, key, key_len);
+      if (cmp < 0)
+          first = middle + 1;
+      else if (cmp > 0)
+          filled_size = middle;
+      else
+          return middle;
+  }
+  return ~filled_size;
+}
+
 int SQLiteNoSQL::locate(int32_t rootPage, byte **payloadPtr,
       int64_t rowId, byte *keyArray[], int keyLenArray[],
-      struct cursor_struct *cursor) {
-  buf = getPage(rootPage);
+      cursor_class *cursor) {
+  int32_t curPage = rootPage;
+  if (cursor != NULL)
+    cursor->popAll();
   do {
-    add to page path
-    binary search
+    getPage(curPage);
+    int cellPos = binarySearch(rowId, keyArray, keyLenArray);
+    if (cursor != NULL) {
+      cursor->pushPage(curPage, cellPos);
+      if (err_no)
+        return;
+    }
     if (index and found)
       return payload
   } while (!leaf)
 }
       
-int SQLiteNoSQL::next(struct cursor_struct *cursor, byte **payloadPtr) {
+int SQLiteNoSQL::next(cursor_class *cursor, byte **payloadPtr) {
   
 }
 
@@ -173,8 +205,8 @@ double SQLiteNoSQL::getFloatValue(byte *at) {
   return out;
 }
 
-int SQLiteNoSQL::compare(const char *v1, byte len1, const char *v2,
-      byte len2, int k = 0) {
+int SQLiteNoSQL::compare(const char *v1, byte len1,
+      const char *v2, byte len2, int k) {
   int lim = (len2 < len1 ? len2 : len1);
   while (k < lim) {
       byte c1 = v1[k];
